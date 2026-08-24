@@ -1,6 +1,8 @@
 import type {
+  Prisma,
   SubscriptionPlan,
   SubscriptionStatus as PrismaSubscriptionStatus,
+  Transaction,
 } from '@prisma/client';
 import prisma from '../config/prisma.js';
 import type {
@@ -8,6 +10,14 @@ import type {
   SubscriptionChargedEventData,
   SubscriptionPlanCreatedEventData,
 } from '../indexer/types.js';
+import type {
+  AdminSubscriptionListFilters,
+  AdminSubscriptionListPagination,
+  AdminSubscriptionPaymentsFilters,
+  SubscriptionListSortBy,
+  SubscriptionListSortDir,
+} from '../utils/subscription.validation.js';
+import { AppError } from '../utils/errors.js';
 import { recordDailyStats, recordVolumeEvent } from './analytics.services.js';
 import { recordAuditLog, ActorType } from './audit-log.services.js';
 
@@ -257,4 +267,196 @@ export const applySubscriptionCharge = async (
 
     return { subscription: updatedSubscription, transaction };
   });
+};
+
+// ── Read side (admin dashboard) ───────────────────────────────────────────────
+
+/**
+ * Public-facing view of a subscription. `plan.amount` is serialized to a string
+ * because `BigInt` is not JSON-serializable. `Subscription` deliberately has no
+ * Merchant relation (see the schema), so merchantAddress is resolved to a
+ * merchant id before filtering, never reached through the plan.
+ */
+export const sanitizeSubscription = (subscription: {
+  id: string;
+  subscriptionId: number;
+  planId: string;
+  merchantId: string;
+  customer: string;
+  status: PrismaSubscriptionStatus;
+  lastCharged: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+  plan?: {
+    planId: number;
+    description: string;
+    token: string;
+    amount: bigint;
+    interval: number;
+    active: boolean;
+  };
+}) => ({
+  id: subscription.id,
+  subscriptionId: subscription.subscriptionId,
+  planId: subscription.planId,
+  merchantId: subscription.merchantId,
+  customer: subscription.customer,
+  status: subscription.status,
+  lastCharged: subscription.lastCharged,
+  createdAt: subscription.createdAt,
+  updatedAt: subscription.updatedAt,
+  // Inlined so the admin does not need a second request for the plan's
+  // description, amount and interval.
+  plan: subscription.plan
+    ? {
+        planId: subscription.plan.planId,
+        description: subscription.plan.description,
+        token: subscription.plan.token,
+        amount: subscription.plan.amount.toString(),
+        interval: subscription.plan.interval,
+        active: subscription.plan.active,
+      }
+    : undefined,
+});
+
+export const listSubscriptions = async (
+  filters: AdminSubscriptionListFilters,
+  pagination: AdminSubscriptionListPagination,
+  sortBy: SubscriptionListSortBy,
+  sortDir: SubscriptionListSortDir,
+) => {
+  const where: Prisma.SubscriptionWhereInput = {};
+
+  if (filters.status) {
+    where.status = filters.status;
+  }
+
+  if (filters.planId) {
+    where.planId = filters.planId;
+  }
+
+  if (filters.customer) {
+    where.customer = filters.customer;
+  }
+
+  // Subscription.merchantId is a scalar column holding the Merchant.id copied
+  // from the plan at creation time, so an address filter first resolves the
+  // address to a merchant id and then matches it directly. An address with no
+  // Merchant row simply matches no subscriptions.
+  if (filters.merchantAddress) {
+    const merchant = await prisma.merchant.findUnique({
+      where: { address: filters.merchantAddress },
+      select: { id: true },
+    });
+    if (!merchant) {
+      return { data: [], pagination: { ...pagination, total: 0 } };
+    }
+    where.merchantId = merchant.id;
+  }
+
+  // The literal `id` tiebreaker keeps ordering stable across pages so a
+  // reordered row cannot shift between offsets, matching listAuditLogs.
+  const orderBy: Prisma.SubscriptionOrderByWithRelationInput[] = [
+    { [sortBy]: sortDir },
+    { id: 'desc' },
+  ];
+
+  const [subscriptions, total] = await Promise.all([
+    prisma.subscription.findMany({
+      where,
+      take: pagination.limit,
+      skip: pagination.offset,
+      orderBy,
+      include: { plan: true },
+    }),
+    prisma.subscription.count({ where }),
+  ]);
+
+  return {
+    data: subscriptions.map(sanitizeSubscription),
+    pagination: {
+      limit: pagination.limit,
+      offset: pagination.offset,
+      total,
+    },
+  };
+};
+
+export const getSubscription = async (id: string) => {
+  const subscription = await prisma.subscription.findUnique({
+    where: { id },
+    include: { plan: true },
+  });
+
+  if (!subscription) {
+    throw new AppError(404, 'Subscription not found');
+  }
+
+  return sanitizeSubscription(subscription);
+};
+
+/**
+ * Public-facing view of a subscription charge. `amount` is serialized to a
+ * string because `BigInt` is not JSON-serializable.
+ */
+export const sanitizeSubscriptionPayment = (transaction: Transaction) => ({
+  id: transaction.id,
+  transactionType: transaction.transactionType,
+  refId: transaction.refId,
+  amount: transaction.amount.toString(),
+  token: transaction.token,
+  merchantId: transaction.merchantId,
+  description: transaction.description,
+  date: transaction.date,
+  createdAt: transaction.createdAt,
+});
+
+/**
+ * Lists the subscription charge history for the admin dashboard.
+ *
+ * ---------------------------------------------------------------------------
+ * DEPENDENCY: Transaction rows with transactionType = 'SUBSCRIPTION_CHARGE'
+ * are written by a single place — applySubscriptionCharge above, from the
+ * indexer's subscriptionCharged.ts handler. Until that handler runs, this
+ * endpoint returns an empty result set by design: it means "no charges have
+ * been indexed yet", not "subscriptions are broken". A non-empty result is
+ * therefore evidence the SubscriptionChargedEvent path is working.
+ * ---------------------------------------------------------------------------
+ */
+export const listSubscriptionPayments = async (
+  filters: AdminSubscriptionPaymentsFilters,
+  pagination: AdminSubscriptionListPagination,
+) => {
+  const where: Prisma.TransactionWhereInput = {
+    transactionType: TransactionType.SUBSCRIPTION_CHARGE,
+  };
+
+  if (filters.merchantAddress) {
+    where.merchant = { address: filters.merchantAddress };
+  }
+
+  if (filters.startDate || filters.endDate) {
+    where.date = {};
+    if (filters.startDate) where.date.gte = filters.startDate;
+    if (filters.endDate) where.date.lte = filters.endDate;
+  }
+
+  const [transactions, total] = await Promise.all([
+    prisma.transaction.findMany({
+      where,
+      take: pagination.limit,
+      skip: pagination.offset,
+      orderBy: { date: 'desc' },
+    }),
+    prisma.transaction.count({ where }),
+  ]);
+
+  return {
+    data: transactions.map(sanitizeSubscriptionPayment),
+    pagination: {
+      limit: pagination.limit,
+      offset: pagination.offset,
+      total,
+    },
+  };
 };
