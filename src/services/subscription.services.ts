@@ -446,7 +446,9 @@ export const listSubscriptionPayments = async (
       where,
       take: pagination.limit,
       skip: pagination.offset,
-      orderBy: { date: 'desc' },
+      // The literal `id` tiebreaker keeps ordering stable across pages when
+      // charges share a timestamp, matching listSubscriptions and listAuditLogs.
+      orderBy: [{ date: 'desc' }, { id: 'desc' }],
     }),
     prisma.transaction.count({ where }),
   ]);

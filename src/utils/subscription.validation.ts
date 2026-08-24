@@ -54,6 +54,42 @@ export type ValidationErrors = Record<string, string>;
 const isNonEmptyString = (value: unknown): value is string =>
   typeof value === 'string' && value.trim().length > 0;
 
+// Matches the leading YYYY-MM-DD of an ISO-8601 string so the calendar
+// components can be compared against what `new Date()` actually parsed.
+const DATE_PREFIX_REGEX = /^(\d{4})-(\d{2})-(\d{2})/;
+
+/**
+ * Parses a date-boundary query parameter, rejecting strings that do not exist
+ * on the calendar. `new Date('2026-02-30')` silently normalizes to 2026-03-02,
+ * which would apply the wrong boundary and return 200; comparing the parsed
+ * UTC calendar components against the input string catches that and returns a
+ * 400 instead. Returns a valid Date, or null (with an error recorded) otherwise.
+ */
+const parseDateBoundary = (
+  value: unknown,
+  field: string,
+  errors: ValidationErrors,
+): Date | null => {
+  const date = new Date(String(value));
+  if (Number.isNaN(date.getTime())) {
+    errors[field] = `${field} must be a valid date`;
+    return null;
+  }
+
+  const match = DATE_PREFIX_REGEX.exec(String(value));
+  if (
+    !match ||
+    date.getUTCFullYear() !== Number(match[1]) ||
+    date.getUTCMonth() !== Number(match[2]) - 1 ||
+    date.getUTCDate() !== Number(match[3])
+  ) {
+    errors[field] = `${field} must be a real calendar date in YYYY-MM-DD`;
+    return null;
+  }
+
+  return date;
+};
+
 /**
  * Parses admin subscription list query parameters into typed filters, sort and
  * pagination, clamping the page size to [1, MAX_LIMIT] and defaulting to
@@ -126,21 +162,13 @@ export const parseAdminSubscriptionPaymentsQuery = (
   }
 
   if (query.startDate !== undefined) {
-    const date = new Date(String(query.startDate));
-    if (Number.isNaN(date.getTime())) {
-      errors.startDate = 'startDate must be a valid date';
-    } else {
-      filters.startDate = date;
-    }
+    const date = parseDateBoundary(query.startDate, 'startDate', errors);
+    if (date) filters.startDate = date;
   }
 
   if (query.endDate !== undefined) {
-    const date = new Date(String(query.endDate));
-    if (Number.isNaN(date.getTime())) {
-      errors.endDate = 'endDate must be a valid date';
-    } else {
-      filters.endDate = date;
-    }
+    const date = parseDateBoundary(query.endDate, 'endDate', errors);
+    if (date) filters.endDate = date;
   }
 
   const { pagination, paginationErrors } = parsePagination(query);

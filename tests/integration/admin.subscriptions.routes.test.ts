@@ -290,7 +290,7 @@ describe('GET /api/v1/admin/subscriptions/payments', () => {
       where: { transactionType: 'SUBSCRIPTION_CHARGE' },
       take: 20,
       skip: 0,
-      orderBy: { date: 'desc' },
+      orderBy: [{ date: 'desc' }, { id: 'desc' }],
     });
   });
 
@@ -311,7 +311,7 @@ describe('GET /api/v1/admin/subscriptions/payments', () => {
       },
       take: 20,
       skip: 0,
-      orderBy: { date: 'desc' },
+      orderBy: [{ date: 'desc' }, { id: 'desc' }],
     });
   });
 
@@ -338,13 +338,22 @@ describe('GET /api/v1/admin/subscriptions/payments', () => {
       },
       take: 20,
       skip: 0,
-      orderBy: { date: 'desc' },
+      orderBy: [{ date: 'desc' }, { id: 'desc' }],
     });
   });
 
   test('returns 400 for an invalid startDate', async () => {
     const response = await request(app)
       .get('/api/v1/admin/subscriptions/payments?startDate=not-a-date')
+      .set('Authorization', `Bearer ${adminToken}`);
+
+    expect(response.status).toBe(400);
+    expect(response.body.errors).toHaveProperty('startDate');
+  });
+
+  test('rejects a nonexistent calendar date that would otherwise normalize', async () => {
+    const response = await request(app)
+      .get('/api/v1/admin/subscriptions/payments?startDate=2026-02-30')
       .set('Authorization', `Bearer ${adminToken}`);
 
     expect(response.status).toBe(400);
