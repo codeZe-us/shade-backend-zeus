@@ -3,6 +3,7 @@ import authRoutes from './auth.routes.js';
 import analyticsRoutes from './analytics.routes.js';
 import merchantRoutes from './merchant.routes.js';
 import logsRoutes from './logs.routes.js';
+import subscriptionsRoutes from './subscriptions.routes.js';
 import { authenticateAdmin } from '../../middlewares/admin.middleware.js';
 
 const router = Router();
@@ -17,6 +18,7 @@ router.use('/analytics', analyticsRoutes);
 // are mounted here behind authenticateAdmin.
 router.use('/merchants', authenticateAdmin, merchantRoutes);
 router.use('/logs', authenticateAdmin, logsRoutes);
+router.use('/subscriptions', authenticateAdmin, subscriptionsRoutes);
 
 // Sibling routers added by later issues (invoice.routes.ts, ...) are mounted
 // here behind authenticateAdmin.
