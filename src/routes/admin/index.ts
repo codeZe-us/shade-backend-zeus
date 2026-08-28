@@ -6,6 +6,7 @@ import merchantRoutes from './merchant.routes.js';
 import logsRoutes from './logs.routes.js';
 import subscriptionsRoutes from './subscriptions.routes.js';
 import invoiceRoutes from './invoice.routes.js';
+import subscriptionPlansRoutes from './subscription-plans.routes.js';
 import { authenticateAdmin } from '../../middlewares/admin.middleware.js';
 
 const router = Router();
@@ -23,5 +24,6 @@ router.use('/merchants', authenticateAdmin, merchantRoutes);
 router.use('/logs', authenticateAdmin, logsRoutes);
 router.use('/subscriptions', authenticateAdmin, subscriptionsRoutes);
 router.use('/invoices', authenticateAdmin, invoiceRoutes);
+router.use('/subscription-plans', authenticateAdmin, subscriptionPlansRoutes);
 
 export default router;
