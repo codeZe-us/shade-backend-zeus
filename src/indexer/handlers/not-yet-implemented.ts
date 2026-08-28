@@ -69,10 +69,8 @@
  *  AccountRestricted event, listed once)
  *
  * ---- Off-chain actions with no endpoint yet ----
- * admin.created <- no admin-management endpoint exists yet (only admin login,
- *                   from a prior issue). Deferred: see the issue discussion —
- *                   building admin-management is out of scope for the
- *                   audit-log issue that added this file.
+ * (admin.created is implemented — POST /admin/admins records it; see
+ *  createAdminController in ../../controllers/admin-auth.controllers.ts)
  *
  * ---- Explicitly excluded, not gaps (per the issue) ----
  * NonceInvalidatedEvent   - not a state change worth auditing

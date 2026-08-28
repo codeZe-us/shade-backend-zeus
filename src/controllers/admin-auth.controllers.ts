@@ -1,7 +1,14 @@
 import { Request, Response } from 'express';
 import { StrKey } from '@stellar/stellar-sdk';
 import { createNonce } from '../services/auth.services.js';
-import { authenticateAdminWallet } from '../services/admin-auth.services.js';
+import {
+  authenticateAdminWallet,
+  createAdmin,
+  sanitizeAdmin,
+} from '../services/admin-auth.services.js';
+import { recordAuditLog, ActorType } from '../services/audit-log.services.js';
+import { validateCreateAdmin } from '../utils/admin.validation.js';
+import { AppError } from '../utils/errors.js';
 
 export const createAdminChallengeController = async (req: Request, res: Response) => {
   try {
@@ -50,6 +57,55 @@ export const verifyAdminSignatureController = async (req: Request, res: Response
     });
   } catch (error) {
     console.error('Failed to verify admin auth signature', {
+      path: req.path,
+      method: req.method,
+      error: error instanceof Error ? error.message : 'Unknown error',
+    });
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+};
+
+/**
+ * Creates another admin. Superadmin-only; the route applies requireSuperAdmin.
+ *
+ * Deliberately makes no smart contract call: admin membership here is a
+ * backend concept, decoupled from the contract's own Admin/Manager/Operator
+ * role system.
+ */
+export const createAdminController = async (req: Request, res: Response): Promise<void> => {
+  const actingAdmin = req.admin;
+  if (!actingAdmin) {
+    res.status(401).json({ error: 'Unauthorized' });
+    return;
+  }
+
+  const { input, errors } = validateCreateAdmin(req.body);
+  if (Object.keys(errors).length > 0) {
+    res.status(400).json({ error: 'Validation failed', errors });
+    return;
+  }
+
+  try {
+    const admin = await createAdmin(actingAdmin.id, input);
+
+    await recordAuditLog({
+      action: 'admin.created',
+      actorType: ActorType.ADMIN,
+      actorId: actingAdmin.id,
+      actorLabel: actingAdmin.address,
+      targetType: 'Admin',
+      targetId: admin.id,
+      metadata: { address: admin.address, isSuperAdmin: admin.isSuperAdmin },
+    });
+
+    res.status(201).json(sanitizeAdmin(admin));
+  } catch (error) {
+    if (error instanceof AppError) {
+      res.status(error.statusCode).json({ error: error.message });
+      return;
+    }
+
+    console.error('Failed to create admin', {
       path: req.path,
       method: req.method,
       error: error instanceof Error ? error.message : 'Unknown error',
