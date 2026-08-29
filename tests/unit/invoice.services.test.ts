@@ -2,9 +2,16 @@ import { jest } from '@jest/globals';
 import { mockReset } from 'jest-mock-extended';
 
 const { default: prismaMock } = (await import('../../src/config/prisma.js')) as any;
-const { createInvoice, listInvoices, getInvoice, voidInvoice, amendInvoice, applyInvoicePayment } = await import(
-  '../../src/services/invoice.services.js'
-);
+const {
+  createInvoice,
+  listInvoices,
+  listAdminInvoices,
+  getInvoice,
+  getAdminInvoice,
+  voidInvoice,
+  amendInvoice,
+  applyInvoicePayment,
+} = await import('../../src/services/invoice.services.js');
 
 const MERCHANT_ID = 'merchant-1';
 
@@ -119,6 +126,53 @@ describe('invoice services', () => {
       prismaMock.invoice.findFirst.mockResolvedValue(null);
 
       await expect(getInvoice(MERCHANT_ID, 'missing')).rejects.toMatchObject({
+        statusCode: 404,
+      });
+    });
+  });
+
+  describe('listAdminInvoices', () => {
+    test('lists invoices across all merchants with status and merchantAddress filters', async () => {
+      prismaMock.invoice.findMany.mockResolvedValue([baseInvoice] as any);
+      prismaMock.invoice.count.mockResolvedValue(1 as any);
+
+      const result = await listAdminInvoices(
+        { status: 'PENDING' as any, merchantAddress: '0x123' },
+        { limit: 10, offset: 5 },
+      );
+
+      expect(result.data).toHaveLength(1);
+      expect(result.data[0].amount).toBe('5000');
+      expect(result.pagination).toEqual({ limit: 10, offset: 5, total: 1 });
+
+      expect(prismaMock.invoice.findMany).toHaveBeenCalledWith({
+        where: {
+          status: 'PENDING',
+          merchant: { address: '0x123' },
+        },
+        take: 10,
+        skip: 5,
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      });
+    });
+  });
+
+  describe('getAdminInvoice', () => {
+    test('returns invoice regardless of merchantId', async () => {
+      prismaMock.invoice.findUnique.mockResolvedValue(baseInvoice as any);
+
+      const result = await getAdminInvoice('invoice-1');
+
+      expect(result.id).toBe('invoice-1');
+      expect(prismaMock.invoice.findUnique).toHaveBeenCalledWith({
+        where: { id: 'invoice-1' },
+      });
+    });
+
+    test('throws 404 when invoice does not exist', async () => {
+      prismaMock.invoice.findUnique.mockResolvedValue(null);
+
+      await expect(getAdminInvoice('missing')).rejects.toMatchObject({
         statusCode: 404,
       });
     });
