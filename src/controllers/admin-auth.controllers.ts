@@ -6,7 +6,6 @@ import {
   createAdmin,
   sanitizeAdmin,
 } from '../services/admin-auth.services.js';
-import { recordAuditLog, ActorType } from '../services/audit-log.services.js';
 import { validateCreateAdmin } from '../utils/admin.validation.js';
 import { AppError } from '../utils/errors.js';
 
@@ -86,17 +85,9 @@ export const createAdminController = async (req: Request, res: Response): Promis
   }
 
   try {
-    const admin = await createAdmin(actingAdmin.id, input);
-
-    await recordAuditLog({
-      action: 'admin.created',
-      actorType: ActorType.ADMIN,
-      actorId: actingAdmin.id,
-      actorLabel: actingAdmin.address,
-      targetType: 'Admin',
-      targetId: admin.id,
-      metadata: { address: admin.address, isSuperAdmin: admin.isSuperAdmin },
-    });
+    // createAdmin writes the row and its admin.created log in one transaction,
+    // so a 201 here always means both committed.
+    const admin = await createAdmin({ id: actingAdmin.id, address: actingAdmin.address }, input);
 
     res.status(201).json(sanitizeAdmin(admin));
   } catch (error) {

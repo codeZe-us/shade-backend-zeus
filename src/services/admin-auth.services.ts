@@ -98,6 +98,12 @@ export const sanitizeAdmin = (admin: Admin) => ({
   updatedAt: admin.updatedAt,
 });
 
+// Duck-typed rather than an instanceof check against
+// PrismaClientKnownRequestError: the generated client is mocked in tests, so
+// the same convention as auth.services.ts applies here.
+const isUniqueConstraintError = (error: unknown): boolean =>
+  (error as { code?: string })?.code === 'P2002';
+
 /**
  * Creates an Admin row on behalf of an acting superadmin.
  *
@@ -111,20 +117,55 @@ export const sanitizeAdmin = (admin: Admin) => ({
  * contract call is made anywhere in this flow. No keypair or secret is involved
  * either — admins authenticate with their own existing Stellar wallet.
  */
-export const createAdmin = async (actingAdminId: string, input: CreateAdminInput) => {
+export const createAdmin = async (
+  actingAdmin: { id: string; address: string },
+  input: CreateAdminInput,
+) => {
   const existing = await prisma.admin.findUnique({ where: { address: input.address } });
 
   if (existing) {
     throw new AppError(409, 'An admin already exists for this address');
   }
 
-  return prisma.admin.create({
-    data: {
-      address: input.address,
-      name: input.name,
-      isSuperAdmin: input.isSuperAdmin,
-      active: true,
-      createdBy: actingAdminId,
-    },
+  // The row and its `admin.created` log share one transaction so a privileged
+  // account can never exist without an audit trail. recordAuditLog is
+  // deliberately not used here: it swallows its own failures, which would break
+  // that invariant. Every other caller still wants that swallowing behaviour.
+  return prisma.$transaction(async (tx: any) => {
+    let admin: Admin;
+
+    try {
+      admin = await tx.admin.create({
+        data: {
+          address: input.address,
+          name: input.name,
+          isSuperAdmin: input.isSuperAdmin,
+          active: true,
+          createdBy: actingAdmin.id,
+        },
+      });
+    } catch (error) {
+      // The findUnique above is not a lock, so two concurrent requests for the
+      // same address can both pass it. Admin.address is unique, so the loser
+      // gets the same 409 it would have got sequentially.
+      if (isUniqueConstraintError(error)) {
+        throw new AppError(409, 'An admin already exists for this address');
+      }
+      throw error;
+    }
+
+    await tx.adminLog.create({
+      data: {
+        action: 'admin.created',
+        actorType: ActorType.ADMIN,
+        actorId: actingAdmin.id,
+        actorLabel: actingAdmin.address,
+        targetType: 'Admin',
+        targetId: admin.id,
+        metadata: { address: admin.address, isSuperAdmin: admin.isSuperAdmin },
+      },
+    });
+
+    return admin;
   });
 };

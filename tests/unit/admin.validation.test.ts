@@ -50,6 +50,17 @@ describe('validateCreateAdmin', () => {
     expect(result.input.isSuperAdmin).toBe(false);
   });
 
+  test('rejects a null isSuperAdmin rather than treating it as omitted', () => {
+    const result = validateCreateAdmin({
+      address: VALID_ADDRESS,
+      name: 'Jane Doe',
+      isSuperAdmin: null,
+    });
+
+    expect(result.errors.isSuperAdmin).toBeDefined();
+    expect(result.input.isSuperAdmin).toBe(false);
+  });
+
   test('rejects an invalid Stellar address', () => {
     const result = validateCreateAdmin({ address: 'not-a-key', name: 'Jane Doe' });
 

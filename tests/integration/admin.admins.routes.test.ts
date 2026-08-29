@@ -53,6 +53,9 @@ describe('POST /api/v1/admin/admins', () => {
     prismaMock.admin.findUnique.mockImplementation(({ where }: any) =>
       Promise.resolve(where.id === superAdmin.id ? superAdmin : null),
     );
+    // The admin row and its audit row are written in one transaction, so the
+    // interactive callback has to run against the same mock client.
+    prismaMock.$transaction.mockImplementation(async (callback: any) => callback(prismaMock));
   });
 
   test('returns 401 when unauthenticated', async () => {
@@ -143,6 +146,46 @@ describe('POST /api/v1/admin/admins', () => {
     expect(prismaMock.admin.create).not.toHaveBeenCalled();
     expect(prismaMock.admin.update).not.toHaveBeenCalled();
     expect(prismaMock.adminLog.create).not.toHaveBeenCalled();
+  });
+
+  test('returns 409 when a concurrent request wins the unique address', async () => {
+    // Both requests pass the findUnique pre-check; only one create survives the
+    // unique constraint on Admin.address.
+    prismaMock.admin.create.mockRejectedValue({ code: 'P2002', meta: { target: ['address'] } });
+
+    const response = await request(app)
+      .post('/api/v1/admin/admins')
+      .set('Authorization', `Bearer ${superAdminToken}`)
+      .send({ address: NEW_ADMIN_ADDRESS, name: 'Jane Doe' });
+
+    expect(response.status).toBe(409);
+    expect(response.body.error).toBe('An admin already exists for this address');
+    expect(prismaMock.adminLog.create).not.toHaveBeenCalled();
+  });
+
+  test('fails the request when the audit row cannot be written', async () => {
+    prismaMock.admin.create.mockResolvedValue(createdAdmin);
+    prismaMock.adminLog.create.mockRejectedValue(new Error('audit write failed'));
+
+    const response = await request(app)
+      .post('/api/v1/admin/admins')
+      .set('Authorization', `Bearer ${superAdminToken}`)
+      .send({ address: NEW_ADMIN_ADDRESS, name: 'Jane Doe' });
+
+    // A privileged account must never be created without an audit trail, so the
+    // transaction rolls back and the caller sees a 500 rather than a 201.
+    expect(response.status).toBe(500);
+  });
+
+  test('returns 400 for a null isSuperAdmin', async () => {
+    const response = await request(app)
+      .post('/api/v1/admin/admins')
+      .set('Authorization', `Bearer ${superAdminToken}`)
+      .send({ address: NEW_ADMIN_ADDRESS, name: 'Jane Doe', isSuperAdmin: null });
+
+    expect(response.status).toBe(400);
+    expect(response.body.errors).toHaveProperty('isSuperAdmin');
+    expect(prismaMock.admin.create).not.toHaveBeenCalled();
   });
 
   test('returns 400 for an invalid Stellar address', async () => {

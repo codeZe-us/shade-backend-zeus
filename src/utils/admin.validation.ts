@@ -17,7 +17,8 @@ const isNonEmptyString = (value: unknown): value is string =>
  * `isSuperAdmin` is optional and defaults to false: a superadmin adding another
  * admin does not implicitly grant superadmin, though it may be requested
  * explicitly. Only a real boolean is accepted — coercing a truthy string here
- * would silently escalate the new admin's privileges.
+ * would silently escalate the new admin's privileges, and an explicit null is
+ * rejected rather than treated as omission.
  */
 export const validateCreateAdmin = (
   body: unknown,
@@ -35,11 +36,9 @@ export const validateCreateAdmin = (
     errors.name = 'name is required';
   }
 
-  if (
-    payload.isSuperAdmin !== undefined &&
-    payload.isSuperAdmin !== null &&
-    typeof payload.isSuperAdmin !== 'boolean'
-  ) {
+  // Only `undefined` counts as omitted. An explicit null is a supplied value
+  // that is not a boolean, so it is rejected rather than silently defaulted.
+  if (payload.isSuperAdmin !== undefined && typeof payload.isSuperAdmin !== 'boolean') {
     errors.isSuperAdmin = 'isSuperAdmin must be a boolean';
   }
 
