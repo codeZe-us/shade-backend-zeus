@@ -3,6 +3,7 @@ import prisma from '../config/prisma.js';
 import { AppError } from '../utils/errors.js';
 import { generatePaymentSlug } from '../utils/slug.js';
 import {
+  AdminInvoiceListFilters,
   CreateInvoiceInput,
   InvoiceListFilters,
   InvoicePagination,
@@ -161,6 +162,52 @@ export const listInvoices = async (
 export const getInvoice = async (merchantId: string, id: string) => {
   const invoice = await prisma.invoice.findFirst({
     where: { id, merchantId },
+  });
+
+  if (!invoice) {
+    throw new AppError(404, 'Invoice not found');
+  }
+
+  return sanitizeInvoice(invoice);
+};
+
+export const listAdminInvoices = async (
+  filters: AdminInvoiceListFilters,
+  pagination: InvoicePagination,
+) => {
+  const where: Prisma.InvoiceWhereInput = {};
+
+  if (filters.status) {
+    where.status = filters.status;
+  }
+
+  if (filters.merchantAddress) {
+    where.merchant = { address: filters.merchantAddress };
+  }
+
+  const [invoices, total] = await Promise.all([
+    prisma.invoice.findMany({
+      where,
+      take: pagination.limit,
+      skip: pagination.offset,
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+    }),
+    prisma.invoice.count({ where }),
+  ]);
+
+  return {
+    data: invoices.map(sanitizeInvoice),
+    pagination: {
+      limit: pagination.limit,
+      offset: pagination.offset,
+      total,
+    },
+  };
+};
+
+export const getAdminInvoice = async (id: string) => {
+  const invoice = await prisma.invoice.findUnique({
+    where: { id },
   });
 
   if (!invoice) {

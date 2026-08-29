@@ -171,3 +171,60 @@ export const parseInvoiceListQuery = (query: Record<string, unknown>): ParsedLis
 
   return { filters, pagination: { limit, offset }, errors };
 };
+
+export interface AdminInvoiceListFilters {
+  status?: InvoiceStatus;
+  merchantAddress?: string;
+}
+
+export interface ParsedAdminInvoiceListQuery {
+  filters: AdminInvoiceListFilters;
+  pagination: InvoicePagination;
+  errors: ValidationErrors;
+}
+
+/**
+ * Parses admin invoice list query parameters into typed filters and pagination,
+ * clamping the page size to [1, MAX_LIMIT] and defaulting to DEFAULT_LIMIT.
+ */
+export const parseAdminInvoiceListQuery = (
+  query: Record<string, unknown>,
+): ParsedAdminInvoiceListQuery => {
+  const errors: ValidationErrors = {};
+  const filters: AdminInvoiceListFilters = {};
+
+  if (query.status !== undefined) {
+    const status = String(query.status).toUpperCase();
+    if ((INVOICE_STATUSES as readonly string[]).includes(status)) {
+      filters.status = status as InvoiceStatus;
+    } else {
+      errors.status = `status must be one of ${INVOICE_STATUSES.join(', ')}`;
+    }
+  }
+
+  if (isNonEmptyString(query.merchantAddress)) {
+    filters.merchantAddress = query.merchantAddress.trim();
+  }
+
+  let limit = DEFAULT_LIMIT;
+  if (query.limit !== undefined) {
+    const parsed = Number(query.limit);
+    if (!Number.isFinite(parsed) || parsed < 1) {
+      errors.limit = 'limit must be a positive number';
+    } else {
+      limit = Math.min(Math.floor(parsed), MAX_LIMIT);
+    }
+  }
+
+  let offset = 0;
+  if (query.offset !== undefined) {
+    const parsed = Number(query.offset);
+    if (!Number.isFinite(parsed) || parsed < 0) {
+      errors.offset = 'offset must be a non-negative number';
+    } else {
+      offset = Math.floor(parsed);
+    }
+  }
+
+  return { filters, pagination: { limit, offset }, errors };
+};

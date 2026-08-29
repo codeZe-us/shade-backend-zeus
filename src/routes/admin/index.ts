@@ -5,6 +5,7 @@ import merchantRoutes from './merchant.routes.js';
 import logsRoutes from './logs.routes.js';
 import subscriptionsRoutes from './subscriptions.routes.js';
 import subscriptionPlansRoutes from './subscription-plans.routes.js';
+import invoiceRoutes from './invoice.routes.js';
 import { authenticateAdmin } from '../../middlewares/admin.middleware.js';
 
 const router = Router();
@@ -24,5 +25,6 @@ router.use('/subscription-plans', authenticateAdmin, subscriptionPlansRoutes);
 
 // Sibling routers added by later issues (invoice.routes.ts, ...) are mounted
 // here behind authenticateAdmin.
+router.use('/invoices', authenticateAdmin, invoiceRoutes);
 
 export default router;
