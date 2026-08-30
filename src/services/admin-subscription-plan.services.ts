@@ -22,10 +22,11 @@ export const sanitizeSubscriptionPlan = (plan: SubscriptionPlan) => ({
 });
 
 export const sanitizeSubscriptionPlanWithCount = (
-  plan: SubscriptionPlan & { _count: { subscriptions: number } },
+  plan: SubscriptionPlan,
+  subscriberCount: number,
 ) => ({
   ...sanitizeSubscriptionPlan(plan),
-  subscriberCount: plan._count.subscriptions,
+  subscriberCount,
 });
 
 export const listSubscriptionPlans = async (
@@ -83,16 +84,15 @@ export const listSubscriptionPlans = async (
 export const getSubscriptionPlan = async (id: string) => {
   const plan = await prisma.subscriptionPlan.findUnique({
     where: { id },
-    include: {
-      _count: {
-        select: { subscriptions: { where: { status: 'ACTIVE' } } },
-      },
-    },
   });
 
   if (!plan) {
     throw new AppError(404, 'Subscription plan not found');
   }
 
-  return sanitizeSubscriptionPlanWithCount(plan);
+  const subscriberCount = await prisma.subscription.count({
+    where: { planId: id, status: 'ACTIVE' },
+  });
+
+  return sanitizeSubscriptionPlanWithCount(plan, subscriberCount);
 };
