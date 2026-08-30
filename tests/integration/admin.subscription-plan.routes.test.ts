@@ -185,10 +185,8 @@ describe('GET /api/v1/admin/subscription-plans/:id', () => {
   });
 
   test('returns the subscription plan with subscriberCount', async () => {
-    prismaMock.subscriptionPlan.findUnique.mockResolvedValue({
-      ...basePlan,
-      _count: { subscriptions: 5 },
-    });
+    prismaMock.subscriptionPlan.findUnique.mockResolvedValue(basePlan);
+    prismaMock.subscription.count.mockResolvedValue(5);
 
     const response = await request(app)
       .get('/api/v1/admin/subscription-plans/plan-uuid')
@@ -197,11 +195,9 @@ describe('GET /api/v1/admin/subscription-plans/:id', () => {
     expect(response.status).toBe(200);
     expect(prismaMock.subscriptionPlan.findUnique).toHaveBeenCalledWith({
       where: { id: 'plan-uuid' },
-      include: {
-        _count: {
-          select: { subscriptions: { where: { status: 'ACTIVE' } } },
-        },
-      },
+    });
+    expect(prismaMock.subscription.count).toHaveBeenCalledWith({
+      where: { planId: 'plan-uuid', status: 'ACTIVE' },
     });
     expect(response.body.id).toBe('plan-uuid');
     expect(response.body.amount).toBe('10000000');
